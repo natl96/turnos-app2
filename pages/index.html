@@ -1,568 +1,368 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Sistema de Turnos | Santander</title>
-<a href="/login" 
-   class="inline-flex items-center gap-2 bg-white text-blue-700 px-6 py-3 rounded-3xl font-semibold hover:bg-blue-50">
-  <i class="fa-solid fa-right-to-bracket"></i>
-  Iniciar sesión (Admin / Asesor)
-</a>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.6.0/css/all.min.css">
-  <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
-  <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
-  <style>
-    * { font-family: 'Archivo', -apple-system, sans-serif; }
-    .mono { font-family: 'JetBrains Mono', monospace; }
-    
-    :root {
-      --primary: #EC0000;
-      --primary-dark: #C00000;
-      --secondary: #0057B8;
-      --accent: #00B140;
-      --dark: #1A1A1A;
-      --light: #F5F5F5;
-    }
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TurnoFlow – Sistema de Gestión de Turnos</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink: #0a0a0f;
+    --paper: #f5f3ee;
+    --accent: #e63946;
+    --accent2: #2b7a78;
+    --gold: #f4a261;
+    --muted: #6b6b7b;
+    --card-bg: #ffffff;
+    --border: #e0ddd6;
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+  body {
+    font-family: 'DM Sans', sans-serif;
+    background: var(--paper);
+    color: var(--ink);
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
 
-    body {
-      background: linear-gradient(135deg, var(--dark) 0%, #2A2A2A 100%);
-      min-height: 100vh;
-    }
+  /* ── HEADER ── */
+  header {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 1rem 2.5rem;
+    background: rgba(245,243,238,0.92);
+    backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--border);
+  }
+  .logo {
+    font-family: 'Syne', sans-serif;
+    font-weight: 800; font-size: 1.4rem;
+    letter-spacing: -0.5px;
+  }
+  .logo span { color: var(--accent); }
+  nav a {
+    font-size: 0.85rem; font-weight: 500;
+    color: var(--muted); text-decoration: none;
+    margin-left: 2rem; transition: color .2s;
+  }
+  nav a:hover { color: var(--ink); }
 
-    .service-card {
-      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-      position: relative;
-      overflow: hidden;
-    }
+  /* ── HERO ── */
+  .hero {
+    min-height: 100vh;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    padding-top: 80px;
+  }
+  .hero-left {
+    display: flex; flex-direction: column; justify-content: center;
+    padding: 5rem 4rem 5rem 6rem;
+  }
+  .hero-tag {
+    display: inline-flex; align-items: center; gap: .5rem;
+    font-size: .75rem; font-weight: 500; letter-spacing: .1em;
+    text-transform: uppercase; color: var(--accent);
+    margin-bottom: 1.5rem;
+  }
+  .hero-tag::before {
+    content: ''; display: block;
+    width: 24px; height: 2px; background: var(--accent);
+  }
+  h1 {
+    font-family: 'Syne', sans-serif;
+    font-size: clamp(2.8rem, 4vw, 4.5rem);
+    font-weight: 800; line-height: 1.05;
+    letter-spacing: -2px;
+    margin-bottom: 1.5rem;
+  }
+  h1 em { font-style: normal; color: var(--accent); }
+  .hero-desc {
+    font-size: 1.05rem; color: var(--muted); line-height: 1.7;
+    max-width: 440px; margin-bottom: 3rem;
+  }
+  .hero-right {
+    position: relative;
+    background: var(--ink);
+    overflow: hidden;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .hero-right::before {
+    content: '';
+    position: absolute; inset: 0;
+    background: radial-gradient(ellipse at 70% 30%, rgba(230,57,70,.25) 0%, transparent 60%),
+                radial-gradient(ellipse at 20% 80%, rgba(43,122,120,.2) 0%, transparent 50%);
+  }
+  .queue-visual {
+    position: relative; z-index: 1;
+    display: flex; flex-direction: column; gap: 1rem;
+    width: 320px;
+  }
+  .ticket-card {
+    background: rgba(255,255,255,.07);
+    border: 1px solid rgba(255,255,255,.12);
+    border-radius: 16px;
+    padding: 1.2rem 1.5rem;
+    display: flex; align-items: center; gap: 1rem;
+    animation: slideIn .6s ease forwards;
+    opacity: 0;
+  }
+  .ticket-card:nth-child(1) { animation-delay: .1s; }
+  .ticket-card:nth-child(2) { animation-delay: .25s; }
+  .ticket-card:nth-child(3) { animation-delay: .4s; }
+  .ticket-card:nth-child(4) { animation-delay: .55s; }
+  @keyframes slideIn {
+    from { transform: translateX(30px); opacity: 0; }
+    to { transform: translateX(0); opacity: 1; }
+  }
+  .ticket-badge {
+    width: 48px; height: 48px; border-radius: 12px;
+    display: flex; align-items: center; justify-content: center;
+    font-family: 'Syne', sans-serif;
+    font-weight: 800; font-size: .9rem; color: #fff;
+    flex-shrink: 0;
+  }
+  .ticket-info { flex: 1; }
+  .ticket-code {
+    font-family: 'Syne', sans-serif;
+    font-size: 1.1rem; font-weight: 700; color: #fff;
+  }
+  .ticket-srv { font-size: .78rem; color: rgba(255,255,255,.5); margin-top: 2px; }
+  .ticket-status {
+    font-size: .72rem; padding: .3rem .7rem; border-radius: 20px;
+    font-weight: 500;
+  }
+  .badge-called { background: rgba(230,57,70,.2); color: #ff8589; }
+  .badge-waiting { background: rgba(244,162,97,.15); color: #f4a261; }
 
-    .service-card::before {
-      content: '';
-      position: absolute;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 4px;
-      background: var(--primary);
-      transform: scaleX(0);
-      transition: transform 0.3s ease;
-    }
+  /* ── MÓDULOS ── */
+  .modules {
+    padding: 6rem 6rem 5rem;
+  }
+  .section-label {
+    font-size: .75rem; font-weight: 500; letter-spacing: .12em;
+    text-transform: uppercase; color: var(--muted);
+    margin-bottom: .75rem;
+  }
+  .section-title {
+    font-family: 'Syne', sans-serif;
+    font-size: 2.2rem; font-weight: 800; letter-spacing: -1px;
+    margin-bottom: 3rem;
+  }
+  .modules-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 1.5rem;
+  }
+  .module-card {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 2rem 1.75rem 2rem;
+    text-decoration: none; color: inherit;
+    display: flex; flex-direction: column;
+    transition: transform .25s, box-shadow .25s, border-color .25s;
+    position: relative; overflow: hidden;
+  }
+  .module-card::before {
+    content: '';
+    position: absolute; top: 0; left: 0; right: 0; height: 3px;
+    background: var(--c);
+    transform: scaleX(0); transform-origin: left;
+    transition: transform .3s ease;
+  }
+  .module-card:hover::before { transform: scaleX(1); }
+  .module-card:hover {
+    transform: translateY(-6px);
+    box-shadow: 0 20px 40px rgba(0,0,0,.1);
+    border-color: transparent;
+  }
+  .mod-icon {
+    width: 52px; height: 52px; border-radius: 14px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 1.5rem; margin-bottom: 1.5rem;
+    background: color-mix(in srgb, var(--c) 12%, transparent);
+  }
+  .mod-name {
+    font-family: 'Syne', sans-serif;
+    font-weight: 700; font-size: 1.15rem; margin-bottom: .5rem;
+  }
+  .mod-desc { font-size: .88rem; color: var(--muted); line-height: 1.6; margin-bottom: 1.5rem; }
+  .mod-btn {
+    display: inline-flex; align-items: center; gap: .5rem;
+    font-size: .82rem; font-weight: 600;
+    color: var(--c);
+    border: 1.5px solid color-mix(in srgb, var(--c) 30%, transparent);
+    padding: .55rem 1.1rem; border-radius: 30px;
+    transition: background .2s, color .2s;
+    width: fit-content;
+    margin-top: auto;
+  }
+  .module-card:hover .mod-btn {
+    background: var(--c); color: #fff;
+  }
+  .mod-btn svg { width: 14px; height: 14px; }
 
-    .service-card:hover::before {
-      transform: scaleX(1);
-    }
+  /* ── STATS ── */
+  .stats-bar {
+    display: grid; grid-template-columns: repeat(4, 1fr);
+    border-top: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+    margin: 0 6rem;
+  }
+  .stat {
+    padding: 2.5rem 2rem;
+    border-right: 1px solid var(--border);
+  }
+  .stat:last-child { border-right: none; }
+  .stat-num {
+    font-family: 'Syne', sans-serif;
+    font-size: 2.8rem; font-weight: 800; line-height: 1;
+    letter-spacing: -2px; margin-bottom: .4rem;
+  }
+  .stat-num span { color: var(--accent); }
+  .stat-label { font-size: .85rem; color: var(--muted); }
 
-    .service-card:hover {
-      transform: translateY(-8px);
-      box-shadow: 0 20px 40px -12px rgba(236, 0, 0, 0.3);
-    }
+  /* ── FOOTER ── */
+  footer {
+    text-align: center; padding: 2.5rem;
+    font-size: .8rem; color: var(--muted);
+    border-top: 1px solid var(--border);
+    margin-top: 5rem;
+  }
 
-    .btn-primary {
-      background: var(--primary);
-      transition: all 0.2s ease;
-    }
-
-    .btn-primary:hover {
-      background: var(--primary-dark);
-      transform: translateY(-2px);
-      box-shadow: 0 8px 16px rgba(236, 0, 0, 0.3);
-    }
-
-    .glass {
-      background: rgba(255, 255, 255, 0.05);
-      backdrop-filter: blur(20px);
-      border: 1px solid rgba(255, 255, 255, 0.1);
-    }
-
-    .modal-overlay {
-      backdrop-filter: blur(8px);
-      animation: fadeIn 0.2s ease;
-    }
-
-    @keyframes fadeIn {
-      from { opacity: 0; }
-      to { opacity: 1; }
-    }
-
-    @keyframes slideUp {
-      from { transform: translateY(20px); opacity: 0; }
-      to { transform: translateY(0); opacity: 1; }
-    }
-
-    .modal-content {
-      animation: slideUp 0.3s ease;
-    }
-
-    .ticket-number {
-      font-size: 4rem;
-      font-weight: 800;
-      letter-spacing: -0.05em;
-      background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      background-clip: text;
-    }
-
-    .badge {
-      display: inline-block;
-      padding: 0.5rem 1rem;
-      border-radius: 9999px;
-      font-size: 0.875rem;
-      font-weight: 600;
-      letter-spacing: 0.05em;
-    }
-
-    input:focus, select:focus {
-      outline: none;
-      border-color: var(--primary);
-      box-shadow: 0 0 0 3px rgba(236, 0, 0, 0.1);
-    }
-  </style>
+  @media (max-width: 1024px) {
+    .hero { grid-template-columns: 1fr; }
+    .hero-right { display: none; }
+    .hero-left { padding: 5rem 2rem 3rem; }
+    .modules { padding: 4rem 2rem 3rem; }
+    .modules-grid { grid-template-columns: 1fr 1fr; }
+    .stats-bar { margin: 0 2rem; grid-template-columns: 1fr 1fr; }
+    h1 { font-size: 2.5rem; }
+  }
+  @media (max-width: 640px) {
+    .modules-grid { grid-template-columns: 1fr; }
+    .stats-bar { grid-template-columns: 1fr 1fr; }
+    header { padding: 1rem 1.5rem; }
+    nav { display: none; }
+  }
+</style>
 </head>
-<body class="text-white">
-  
-  <!-- HEADER -->
-  <header class="glass border-b border-white/10">
-    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-      <div class="flex justify-between items-center">
-        <div class="flex items-center gap-4">
-          <div class="w-14 h-14 bg-white rounded-2xl flex items-center justify-center shadow-lg">
-            <svg class="w-8 h-8" viewBox="0 0 24 24" fill="var(--primary)">
-              <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
-            </svg>
-          </div>
-          <div>
-            <h1 class="text-2xl sm:text-3xl font-bold tracking-tight">Sistema de Turnos</h1>
-            <p class="text-sm text-gray-400">Santander | Gestión Inteligente</p>
-          </div>
+<body>
+
+<header>
+  <div class="logo">Turno<span>Flow</span></div>
+  <nav>
+    <a href="/cliente">Solicitar turno</a>
+    <a href="/pantalla">Pantalla de espera</a>
+    <a href="/asesor">Asesor</a>
+    <a href="/admin">Admin</a>
+  </nav>
+</header>
+
+<section class="hero">
+  <div class="hero-left">
+    <div class="hero-tag">Sistema omnicanal</div>
+    <h1>Gestión de turnos <em>sin fricciones</em></h1>
+    <p class="hero-desc">Plataforma integral para organizar colas de atención, reducir tiempos de espera y brindar una experiencia fluida a cada usuario.</p>
+    <a href="/cliente" style="display:inline-flex;align-items:center;gap:.75rem;background:var(--accent);color:#fff;text-decoration:none;padding:1rem 2rem;border-radius:50px;font-weight:600;font-size:1rem;transition:transform .2s,box-shadow .2s" onmouseover="this.style.transform='translateY(-2px)';this.style.boxShadow='0 12px 30px rgba(230,57,70,.35)'" onmouseout="this.style.transform='';this.style.boxShadow=''">
+      Solicitar mi turno
+      <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+    </a>
+  </div>
+  <div class="hero-right">
+    <div class="queue-visual">
+      <div class="ticket-card">
+        <div class="ticket-badge" style="background:#e63946">CAJ</div>
+        <div class="ticket-info">
+          <div class="ticket-code">CAJ-001</div>
+          <div class="ticket-srv">Caja · Módulo 2</div>
         </div>
-        
-        <div class="flex items-center gap-4">
-          <button onclick="toggleLanguage()" class="glass px-4 py-2 rounded-xl hover:bg-white/10 transition-all flex items-center gap-2">
-            <i class="fas fa-globe"></i>
-            <span id="lang-text" class="hidden sm:inline">ES</span>
-          </button>
-          <button onclick="showWaitingScreen()" class="glass px-4 py-2 rounded-xl hover:bg-white/10 transition-all flex items-center gap-2">
-            <i class="fas fa-tv"></i>
-            <span class="hidden sm:inline">Pantalla</span>
-          </button>
+        <span class="ticket-status badge-called">Llamado</span>
+      </div>
+      <div class="ticket-card">
+        <div class="ticket-badge" style="background:#2b7a78">INF</div>
+        <div class="ticket-info">
+          <div class="ticket-code">INF-003</div>
+          <div class="ticket-srv">Información · En espera</div>
         </div>
+        <span class="ticket-status badge-waiting">~10 min</span>
       </div>
-    </div>
-  </header>
-
-  <!-- MAIN CONTENT -->
-  <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-    
-    <!-- VISTA CLIENTE -->
-    <div id="client-view">
-      <div class="text-center mb-16">
-        <h2 class="text-4xl sm:text-5xl lg:text-6xl font-bold mb-4">
-          ¿Qué servicio <span style="color: var(--primary)">necesitas hoy?</span>
-        </h2>
-        <p class="text-lg sm:text-xl text-gray-400" id="subtitle">
-          Selecciona un servicio y recibe tu turno al instante
-        </p>
-      </div>
-
-      <div id="services-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-16"></div>
-
-      <div class="max-w-2xl mx-auto">
-        <div class="glass rounded-3xl p-8 sm:p-10">
-          <div class="flex items-center gap-3 mb-6">
-            <div class="w-12 h-12 rounded-xl flex items-center justify-center" style="background: linear-gradient(135deg, var(--accent) 0%, var(--secondary) 100%);">
-              <i class="fas fa-mobile-alt text-white text-xl"></i>
-            </div>
-            <h3 class="text-2xl font-bold">Ticket Digital</h3>
-          </div>
-          
-          <p class="text-gray-400 mb-6">Recibe tu turno por correo o SMS</p>
-          
-          <form id="digital-form" onsubmit="takeDigitalTicket(event)" class="space-y-4">
-            <div>
-              <label class="block text-sm font-medium mb-2 text-gray-300">Selecciona el servicio</label>
-              <select id="digital-service" required class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white focus:border-[var(--primary)] transition-all">
-                <option value="">-- Selecciona --</option>
-              </select>
-            </div>
-            
-            <div>
-              <label class="block text-sm font-medium mb-2 text-gray-300">Teléfono (opcional)</label>
-              <input 
-                type="tel" 
-                id="phone" 
-                pattern="[0-9]{10}" 
-                placeholder="3001234567" 
-                class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white placeholder:text-gray-500 transition-all"
-              >
-            </div>
-            
-            <div>
-              <label class="block text-sm font-medium mb-2 text-gray-300">Correo electrónico (opcional)</label>
-              <input 
-                type="email" 
-                id="email" 
-                placeholder="tu@email.com" 
-                class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white placeholder:text-gray-500 transition-all"
-              >
-            </div>
-            
-            <button 
-              type="submit" 
-              class="w-full py-4 rounded-xl text-lg font-semibold btn-primary text-white">
-              <i class="fas fa-ticket-alt mr-2"></i>
-              Solicitar Ticket Digital
-            </button>
-          </form>
+      <div class="ticket-card">
+        <div class="ticket-badge" style="background:#f4a261">TRA</div>
+        <div class="ticket-info">
+          <div class="ticket-code">TRA-007</div>
+          <div class="ticket-srv">Trámites · En espera</div>
         </div>
+        <span class="ticket-status badge-waiting">~15 min</span>
       </div>
-    </div>
-
-    <!-- VISTA PANTALLA DE ESPERA -->
-    <div id="waiting-view" class="hidden">
-      <div class="text-center mb-12">
-        <h2 class="text-4xl font-bold mb-4">Turnos Llamados</h2>
-        <p class="text-gray-400">Últimas atenciones realizadas</p>
-      </div>
-      
-      <div id="recent-calls" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8"></div>
-      
-      <div class="text-center">
-        <button onclick="hideWaitingScreen()" class="glass px-8 py-4 rounded-xl hover:bg-white/10 transition-all">
-          <i class="fas fa-arrow-left mr-2"></i>
-          Volver a Solicitar Turno
-        </button>
-      </div>
-    </div>
-
-  </main>
-
-  <!-- MODAL TICKET -->
-  <div id="ticket-modal" class="hidden fixed inset-0 bg-black/90 modal-overlay flex items-center justify-center z-50 p-4">
-    <div class="bg-white text-gray-900 rounded-3xl max-w-lg w-full overflow-hidden modal-content">
-      <div class="p-8 sm:p-12">
-        <div id="ticket-content"></div>
-      </div>
-      
-      <div class="grid grid-cols-2 border-t border-gray-200">
-        <button onclick="cancelTicket()" class="py-4 text-gray-600 hover:bg-gray-50 transition-all font-medium">
-          <i class="fas fa-times mr-2"></i>Cancelar
-        </button>
-        <button onclick="closeTicketModal()" class="py-4 font-semibold text-white transition-all" style="background: var(--primary);">
-          <i class="fas fa-check mr-2"></i>Aceptar
-        </button>
+      <div class="ticket-card">
+        <div class="ticket-badge" style="background:#6d6875">SOP</div>
+        <div class="ticket-info">
+          <div class="ticket-code">SOP-002</div>
+          <div class="ticket-srv">Soporte · En espera</div>
+        </div>
+        <span class="ticket-status badge-waiting">~5 min</span>
       </div>
     </div>
   </div>
+</section>
 
-  <script>
-    let language = 'es';
-    let currentTicketId = null;
-    let autoResetTimer = null;
-    
-    const translations = {
-      es: {
-        subtitle: "Selecciona un servicio y recibe tu turno al instante",
-        ticketTitle: "¡Tu turno está listo!",
-        ticketSubtitle: "Guarda esta información",
-        peopleAhead: "Personas delante",
-        estimatedTime: "Tiempo estimado",
-        minutes: "minutos",
-        scanQR: "Escanea el código QR para consultar tu turno",
-        selectService: "-- Selecciona --"
-      },
-      en: {
-        subtitle: "Choose a service and get your ticket instantly",
-        ticketTitle: "Your ticket is ready!",
-        ticketSubtitle: "Save this information",
-        peopleAhead: "People ahead",
-        estimatedTime: "Estimated time",
-        minutes: "minutes",
-        scanQR: "Scan the QR code to track your ticket",
-        selectService: "-- Select --"
-      }
-    };
+<div class="stats-bar">
+  <div class="stat">
+    <div class="stat-num">4<span>+</span></div>
+    <div class="stat-label">Servicios disponibles</div>
+  </div>
+  <div class="stat">
+    <div class="stat-num">3</div>
+    <div class="stat-label">Módulos de atención</div>
+  </div>
+  <div class="stat">
+    <div class="stat-num">0<span>s</span></div>
+    <div class="stat-label">Tiempo de asignación</div>
+  </div>
+  <div class="stat">
+    <div class="stat-num">RT</div>
+    <div class="stat-label">Actualizaciones en vivo</div>
+  </div>
+</div>
 
-    async function loadServices() {
-      try {
-        const res = await fetch('/api/estado');
-        const data = await res.json();
-        
-        const grid = document.getElementById('services-grid');
-        const select = document.getElementById('digital-service');
-        
-        const activeServices = data.services.filter(s => s.active);
-        
-        grid.innerHTML = activeServices.map((s, i) => `
-          <div 
-            onclick="takeTicket('${s.id}', '${s.name}')" 
-            class="service-card bg-white text-gray-900 rounded-2xl p-8 cursor-pointer"
-            style="animation: slideUp 0.3s ease ${i * 0.1}s backwards;"
-          >
-            <div class="flex items-center justify-between mb-4">
-              <div class="w-16 h-16 rounded-xl flex items-center justify-center text-3xl" style="background: ${s.color}20; color: ${s.color};">
-                <i class="fas fa-briefcase"></i>
-              </div>
-              <span class="badge mono" style="background: ${s.color}20; color: ${s.color};">
-                ${s.prefix}
-              </span>
-            </div>
-            
-            <h3 class="text-2xl font-bold mb-2">${s.name}</h3>
-            <p class="text-gray-600 flex items-center gap-2">
-              <i class="far fa-clock"></i>
-              ~${s.estimatedMinutes} min
-            </p>
-          </div>
-        `).join('');
-        
-        select.innerHTML = `
-          <option value="">${translations[language].selectService}</option>
-          ${activeServices.map(s => `<option value="${s.id}">${s.name}</option>`).join('')}
-        `;
-        
-      } catch (error) {
-        console.error('Error loading services:', error);
-        alert('❌ No se pudieron cargar los servicios. Por favor, recarga la página.');
-      }
-    }
+<section class="modules">
+  <div class="section-label">Módulos del sistema</div>
+  <div class="section-title">Todo lo que necesitas</div>
 
-    async function takeTicket(serviceId, serviceName) {
-      try {
-        const res = await fetch('/api/turnos', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ 
-            serviceId, 
-            channel: 'kiosco', 
-            deliveryType: 'impreso',
-            language
-          })
-        });
-        
-        const result = await res.json();
-        
-        if (result.success) {
-          showTicket(result.ticket, serviceName);
-        } else {
-          alert('❌ ' + (result.message || 'Error al generar el turno'));
-        }
-      } catch (error) {
-        console.error('Error:', error);
-        alert('❌ Error de conexión. Intenta nuevamente.');
-      }
-    }
+  <div class="modules-grid">
+    <a href="/cliente" class="module-card" style="--c:#e63946">
+      <div class="mod-icon" style="--c:#e63946">🎫</div>
+      <div class="mod-name">Módulo Cliente</div>
+      <div class="mod-desc">Solicita tu turno en segundos, elige el servicio y recibe tu ticket con código único y tiempo estimado.</div>
+      <span class="mod-btn">Solicitar turno <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M5 12h14M12 5l7 7-7 7"/></svg></span>
+    </a>
+    <a href="/asesor" class="module-card" style="--c:#2b7a78">
+      <div class="mod-icon" style="--c:#2b7a78">🖥️</div>
+      <div class="mod-name">Panel Asesor</div>
+      <div class="mod-desc">Gestiona la cola de atención, llama al siguiente turno, registra tiempos y agrega notas de cada caso.</div>
+      <span class="mod-btn">Ir al panel <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M5 12h14M12 5l7 7-7 7"/></svg></span>
+    </a>
+    <a href="/admin" class="module-card" style="--c:#f4a261">
+      <div class="mod-icon" style="--c:#f4a261">⚙️</div>
+      <div class="mod-name">Panel Admin</div>
+      <div class="mod-desc">Dashboard en tiempo real, gestión de usuarios, servicios, reportes y monitoreo de todos los módulos.</div>
+      <span class="mod-btn">Administrar <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M5 12h14M12 5l7 7-7 7"/></svg></span>
+    </a>
+    <a href="/pantalla" class="module-card" style="--c:#6d6875">
+      <div class="mod-icon" style="--c:#6d6875">📺</div>
+      <div class="mod-name">Pantalla de Espera</div>
+      <div class="mod-desc">Visualización pública con los últimos turnos llamados, alertas sonoras y estado de cada módulo.</div>
+      <span class="mod-btn">Ver pantalla <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M5 12h14M12 5l7 7-7 7"/></svg></span>
+    </a>
+  </div>
+</section>
 
-    async function takeDigitalTicket(event) {
-      event.preventDefault();
-      
-      const serviceId = document.getElementById('digital-service').value;
-      const phone = document.getElementById('phone').value.trim();
-      const email = document.getElementById('email').value.trim();
-      
-      if (!serviceId) {
-        alert(language === 'es' ? '❌ Selecciona un servicio' : '❌ Select a service');
-        return;
-      }
-      
-      if (!phone && !email) {
-        alert(language === 'es' ? '❌ Ingresa al menos teléfono o correo' : '❌ Enter phone or email');
-        return;
-      }
-      
-      if (phone && !/^[0-9]{10}$/.test(phone)) {
-        alert(language === 'es' ? '❌ Teléfono inválido (10 dígitos)' : '❌ Invalid phone (10 digits)');
-        return;
-      }
-      
-      try {
-        const res = await fetch('/api/turnos', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ 
-            serviceId, 
-            channel: 'web', 
-            deliveryType: 'digital', 
-            phone, 
-            email,
-            language
-          })
-        });
-        
-        const result = await res.json();
-        
-        if (result.success) {
-          const service = await getServiceName(serviceId);
-          showTicket(result.ticket, service);
-          document.getElementById('digital-form').reset();
-        } else {
-          alert('❌ ' + (result.message || 'Error al generar el turno'));
-        }
-      } catch (error) {
-        console.error('Error:', error);
-        alert('❌ Error de conexión. Intenta nuevamente.');
-      }
-    }
-
-    async function getServiceName(serviceId) {
-      try {
-        const res = await fetch('/api/estado');
-        const data = await res.json();
-        const service = data.services.find(s => s.id === serviceId);
-        return service ? service.name : 'Servicio';
-      } catch {
-        return 'Servicio';
-      }
-    }
-
-    function showTicket(ticket, serviceName) {
-      currentTicketId = ticket.id;
-      const modal = document.getElementById('ticket-modal');
-      const content = document.getElementById('ticket-content');
-      const t = translations[language];
-      
-      const qrCanvas = document.createElement('canvas');
-      QRCode.toCanvas(qrCanvas, `${window.location.origin}/turno/${ticket.id}`, {
-        width: 200,
-        margin: 1,
-        color: { dark: '#1A1A1A', light: '#FFFFFF' }
-      });
-      
-      content.innerHTML = `
-        <div class="text-center">
-          <div class="inline-block p-3 rounded-2xl mb-4" style="background: var(--accent);">
-            <i class="fas fa-check text-white text-3xl"></i>
-          </div>
-          
-          <h2 class="text-3xl font-bold mb-2">${t.ticketTitle}</h2>
-          <p class="text-gray-500 mb-6">${t.ticketSubtitle}</p>
-          
-          <div class="ticket-number mono mb-6">${ticket.id}</div>
-          
-          <div class="mb-6 p-4 bg-gray-50 rounded-xl">
-            <p class="text-xl font-semibold mb-1">${serviceName}</p>
-            <p class="text-sm text-gray-500">${new Date(ticket.queueEnteredAt).toLocaleString('es-CO')}</p>
-          </div>
-          
-          <div class="grid grid-cols-2 gap-4 mb-8">
-            <div class="p-4 bg-gray-50 rounded-xl">
-              <p class="text-sm text-gray-500 mb-1">${t.peopleAhead}</p>
-              <p class="text-3xl font-bold" style="color: var(--secondary);">${ticket.peopleAhead}</p>
-            </div>
-            <div class="p-4 bg-gray-50 rounded-xl">
-              <p class="text-sm text-gray-500 mb-1">${t.estimatedTime}</p>
-              <p class="text-3xl font-bold" style="color: var(--primary);">${ticket.estimatedWaitMinutes}</p>
-              <p class="text-xs text-gray-400">${t.minutes}</p>
-            </div>
-          </div>
-          
-          <div class="border-2 border-dashed border-gray-300 rounded-xl p-6">
-            <p class="text-sm text-gray-600 mb-3">${t.scanQR}</p>
-            <div class="flex justify-center"></div>
-          </div>
-        </div>
-      `;
-      
-      content.querySelector('.flex.justify-center').appendChild(qrCanvas);
-      
-      modal.classList.remove('hidden');
-      
-      if (autoResetTimer) clearTimeout(autoResetTimer);
-      autoResetTimer = setTimeout(() => {
-        if (!modal.classList.contains('hidden')) closeTicketModal();
-      }, 15000);
-    }
-
-    function closeTicketModal() {
-      document.getElementById('ticket-modal').classList.add('hidden');
-      currentTicketId = null;
-      if (autoResetTimer) clearTimeout(autoResetTimer);
-      loadServices();
-    }
-
-    async function cancelTicket() {
-      if (!currentTicketId) return closeTicketModal();
-      
-      if (!confirm(language === 'es' ? '¿Seguro que deseas cancelar este turno?' : 'Are you sure you want to cancel this ticket?')) {
-        return;
-      }
-      
-      try {
-        const res = await fetch(`/api/turnos/${currentTicketId}/cancelar`, {
-          method: 'POST'
-        });
-        
-        const result = await res.json();
-        
-        if (result.success) {
-          alert('✅ ' + (language === 'es' ? 'Turno cancelado correctamente' : 'Ticket cancelled successfully'));
-          closeTicketModal();
-        } else {
-          alert('❌ ' + (result.message || 'Error al cancelar'));
-        }
-      } catch (error) {
-        console.error('Error:', error);
-        alert('❌ Error de conexión');
-      }
-    }
-
-    async function showWaitingScreen() {
-      document.getElementById('client-view').classList.add('hidden');
-      document.getElementById('waiting-view').classList.remove('hidden');
-      loadWaitingScreen();
-      setInterval(loadWaitingScreen, 4000);
-    }
-
-    async function loadWaitingScreen() {
-      try {
-        const res = await fetch('/api/estado');
-        const data = await res.json();
-        const container = document.getElementById('recent-calls');
-        
-        if (data.recentCalls && data.recentCalls.length > 0) {
-          container.innerHTML = data.recentCalls.map((call, i) => `
-            <div class="glass rounded-2xl p-8 text-center" style="animation: slideUp 0.3s ease ${i * 0.1}s backwards;">
-              <div class="text-6xl font-bold mb-4 mono" style="color: var(--accent);">
-                ${call.number}
-              </div>
-              <div class="text-xl font-semibold mb-2">${call.serviceName}</div>
-              <div class="text-sm text-gray-400">
-                <i class="fas fa-user-tie mr-2"></i>
-                Módulo ${call.moduleNumber}
-              </div>
-              <div class="mt-4 text-xs text-gray-500">
-                ${new Date(call.timestamp).toLocaleTimeString('es-CO')}
-              </div>
-            </div>
-          `).join('');
-        } else {
-          container.innerHTML = `
-            <div class="col-span-3 text-center py-12">
-              <div class="text-6xl mb-4">⏳</div>
-              <p class="text-xl text-gray-400">No hay turnos llamados aún</p>
-            </div>
-          `;
-        }
-      } catch (error) {
-        console.error('Error loading waiting screen:', error);
-      }
-    }
-
-    function hideWaitingScreen() {
-      document.getElementById('waiting-view').classList.add('hidden');
-      document.getElementById('client-view').classList.remove('hidden');
-    }
-
-    function toggleLanguage() {
-      language = language === 'es' ? 'en' : 'es';
-      document.getElementById('lang-text').textContent = language.toUpperCase();
-      document.getElementById('subtitle').textContent = translations[language].subtitle;
-      loadServices();
-    }
-
-    window.onload = loadServices;
-  </script>
+<footer>
+  TurnoFlow &copy; 2026 · Sistema de Gestión de Turnos Omnicanal · Ingeniería de Software
+</footer>
 
 </body>
 </html>
