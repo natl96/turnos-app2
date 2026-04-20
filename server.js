@@ -1,566 +1,301 @@
 const express = require('express');
+const http = require('http');
+const { Server } = require('socket.io');
 const path = require('path');
-const fs = require('fs');
 
 const app = express();
-const PORT = process.env.PORT || 3000;
-const DATA_FILE = path.join(__dirname, 'data.json');
+const server = http.createServer(app);
+const io = new Server(server, { cors: { origin: '*' } });
 
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
-app.use('/pages', express.static(path.join(__dirname, 'pages')));
 
-// ====================== USUARIOS DEMO ======================
-const USERS = {
-  "admin":     { password: "admin123", role: "admin",     redirect: "/pages/admin.html" },
-  "asesor01":  { password: "1234",     role: "asesor",   redirect: "/pages/asesor.html" }
-};
+// ─── Estado en memoria ───────────────────────────────────────────────────────
+let cola = [];          // { id, codigo, servicio, nombre, telefono, estado, horaCreacion, horaLlamado, horaFin, modulo, notas }
+let turnos = [];        // histórico
+let contadores = {};    // { 'CAJA': 1, 'INFO': 1, ... }
+let modulos = {};       // { '1': { asesorId, servicio, estado: 'disponible'|'ocupado'|'pausa' } }
+let asesores = [
+  { id: 'a1', nombre: 'Ana García',    modulo: '1', password: '1234' },
+  { id: 'a2', nombre: 'Luis Martínez', modulo: '2', password: '1234' },
+  { id: 'a3', nombre: 'María López',   modulo: '3', password: '1234' },
+];
+let servicios = [
+  { id: 's1', nombre: 'Caja',         codigo: 'CAJ', activo: true },
+  { id: 's2', nombre: 'Información',  codigo: 'INF', activo: true },
+  { id: 's3', nombre: 'Trámites',     codigo: 'TRA', activo: true },
+  { id: 's4', nombre: 'Soporte',      codigo: 'SOP', activo: true },
+];
+let usuarios = [
+  { id: 'u1', nombre: 'Admin', email: 'admin@turnos.com', password: 'admin123', rol: 'admin' },
+];
+let ultimosLlamados = []; // máx 5, para pantalla de espera
 
-// ====================== LOGIN API ======================
-app.post('/api/login', (req, res) => {
-  const { username, password } = req.body;
-  const user = USERS[username];
+function generarCodigo(servicio) {
+  const srv = servicios.find(s => s.id === servicio || s.nombre === servicio);
+  const cod = srv ? srv.codigo : 'TUR';
+  if (!contadores[cod]) contadores[cod] = 1;
+  const num = String(contadores[cod]++).padStart(3, '0');
+  return `${cod}-${num}`;
+}
 
-  if (user && user.password === password) {
-    res.json({ success: true, redirect: user.redirect });
-  } else {
-    res.status(401).json({ success: false, message: 'Usuario o contraseña incorrectos' });
-  }
+function calcularEspera(servicioId) {
+  const enCola = cola.filter(t => t.servicio === servicioId && t.estado === 'esperando');
+  return enCola.length * 5; // 5 min promedio por turno
+}
+
+function emitirEstado() {
+  const estado = {
+    cola: cola.filter(t => t.estado === 'esperando'),
+    ultimosLlamados,
+    totalEsperando: cola.filter(t => t.estado === 'esperando').length,
+    servicios: servicios.map(s => ({
+      ...s,
+      enEspera: cola.filter(t => t.servicio === s.id && t.estado === 'esperando').length,
+      tiempoEstimado: calcularEspera(s.id),
+    })),
+    modulos,
+  };
+  io.emit('estado', estado);
+}
+
+// ─── API CLIENTE ─────────────────────────────────────────────────────────────
+
+// Obtener servicios disponibles
+app.get('/api/servicios', (req, res) => {
+  res.json(servicios.filter(s => s.activo).map(s => ({
+    ...s,
+    enEspera: cola.filter(t => t.servicio === s.id && t.estado === 'esperando').length,
+    tiempoEstimado: calcularEspera(s.id),
+  })));
 });
 
-// Rutas principales (una sola entrada)
-app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'pages', 'index.html')));
-app.get('/login', (req, res) => res.sendFile(path.join(__dirname, 'pages', 'login.html')));
-app.get('/asesor', (req, res) => res.sendFile(path.join(__dirname, 'pages', 'asesor.html')));
-app.get('/admin', (req, res) => res.sendFile(path.join(__dirname, 'pages', 'admin.html')));
-app.get('/pantalla', (req, res) => res.sendFile(path.join(__dirname, 'pages', 'pantalla.html')));
+// Solicitar turno
+app.post('/api/turno', (req, res) => {
+  const { servicioId, nombre, telefono, email } = req.body;
+  if (!servicioId) return res.status(400).json({ error: 'Servicio requerido' });
 
+  const srv = servicios.find(s => s.id === servicioId);
+  if (!srv) return res.status(404).json({ error: 'Servicio no encontrado' });
 
-// ====================== ESTADO ======================
-let services = [];
-let queue = [];
-let currentTicket = null;
-let recentCalls = [];
-let history = [];
-let waitMessages = [];
-let advisor = {
-  loggedIn: false,
-  moduleNumber: '',
-  paused: false,
-  serviceIds: []
-};
-let ticketCounter = 1;
-let lastResetDate = new Date().toDateString();
-
-// ====================== FUNCIONES DE PERSISTENCIA ======================
-function loadState() {
-  if (fs.existsSync(DATA_FILE)) {
-    try {
-      const data = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
-      services = data.services || createDefaultServices();
-      queue = data.queue || [];
-      currentTicket = data.currentTicket || null;
-      recentCalls = data.recentCalls || [];
-      history = data.history || [];
-      waitMessages = data.waitMessages?.length ? data.waitMessages : getDefaultWaitMessages();
-      advisor = data.advisor || { loggedIn: false, moduleNumber: '', paused: false, serviceIds: [] };
-      ticketCounter = data.ticketCounter || 1;
-      lastResetDate = data.lastResetDate || new Date().toDateString();
-
-      console.log('✅ Estado cargado desde data.json');
-    } catch (err) {
-      console.error('❌ Error al cargar data.json, usando valores por defecto:', err.message);
-      resetToDefaults();
-    }
-  } else {
-    resetToDefaults();
-  }
-  // Sincronizar serviceIds del advisor
-  if (advisor.serviceIds.length === 0) {
-    advisor.serviceIds = services.map(s => s.id);
-  }
-}
-
-function saveState() {
-  // Limitar historial en memoria y archivo (máx 2000 tickets)
-  if (history.length > 2000) history = history.slice(-2000);
-
-  const data = {
-    services,
-    queue,
-    currentTicket,
-    recentCalls,
-    history,
-    waitMessages,
-    advisor,
-    ticketCounter,
-    lastResetDate
+  const codigo = generarCodigo(servicioId);
+  const turno = {
+    id: Date.now().toString(),
+    codigo,
+    servicio: servicioId,
+    servicioNombre: srv.nombre,
+    nombre: nombre || 'Cliente',
+    telefono: telefono || '',
+    email: email || '',
+    estado: 'esperando',
+    horaCreacion: new Date().toISOString(),
+    horaLlamado: null,
+    horaFin: null,
+    modulo: null,
+    notas: '',
+    posicion: cola.filter(t => t.servicio === servicioId && t.estado === 'esperando').length + 1,
+    tiempoEstimado: calcularEspera(servicioId) + 5,
   };
 
-  try {
-    fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
-  } catch (err) {
-    console.error('❌ Error al guardar estado:', err.message);
-  }
-}
-
-function resetToDefaults() {
-  services = createDefaultServices();
-  queue = [];
-  currentTicket = null;
-  recentCalls = [];
-  history = [];
-  waitMessages = getDefaultWaitMessages();
-  advisor = {
-    loggedIn: false,
-    moduleNumber: '',
-    paused: false,
-    serviceIds: services.map(s => s.id)
-  };
-  ticketCounter = 1;
-  lastResetDate = new Date().toDateString();
-  console.log('🔄 Usando configuración por defecto');
-}
-
-// ====================== FUNCIONES AUXILIARES ======================
-function createDefaultServices() {
-  return [
-    { id: 'cuentas', name: 'Cuentas y tarjetas', prefix: 'CT', estimatedMinutes: 6, color: '#0d6efd', active: true },
-    { id: 'prestamos', name: 'Préstamos', prefix: 'PR', estimatedMinutes: 10, color: '#14b8a6', active: true },
-    { id: 'caja', name: 'Atención en caja', prefix: 'CJ', estimatedMinutes: 4, color: '#f59e0b', active: true }
-  ];
-}
-
-function getDefaultWaitMessages() {
-  return [
-    'Ten tu documento listo para agilizar la atención.',
-    'Puedes solicitar tu turno desde el enlace rápido o el QR.',
-    'Nuestros asesores priorizan el orden de llegada por servicio.'
-  ];
-}
-
-function nowIso() { return new Date().toISOString(); }
-
-function clampText(value, max = 120) {
-  return String(value || '').trim().replace(/\s+/g, ' ').slice(0, max);
-}
-
-function slugify(value) {
-  return clampText(value)
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/(^-|-$)/g, '');
-}
-
-function createServiceId(name) {
-  const base = slugify(name) || `servicio-${services.length + 1}`;
-  let candidate = base;
-  let index = 2;
-  while (services.some(s => s.id === candidate)) {
-    candidate = `${base}-${index}`;
-    index++;
-  }
-  return candidate;
-}
-
-function getServiceById(id) {
-  return services.find(s => s.id === id);
-}
-
-function serviceDuration(serviceId) {
-  return getServiceById(serviceId)?.estimatedMinutes || 5;
-}
-
-function minutesBetween(start, end) {
-  if (!start || !end) return 0;
-  const diff = new Date(end) - new Date(start);
-  return Math.max(0, Math.round(diff / 60000));
-}
-
-function average(values) {
-  if (!values.length) return 0;
-  return Math.round(values.reduce((a, b) => a + b, 0) / values.length);
-}
-
-function computeEstimatedWait(serviceId) {
-  const pending = queue.reduce((total, t) => total + serviceDuration(t.serviceId), 0);
-  const active = currentTicket ? serviceDuration(currentTicket.serviceId) : 0;
-  return pending + active + serviceDuration(serviceId);
-}
-
-function createTicketCode(service) {
-  return `${service.prefix}-${String(ticketCounter).padStart(3, '0')}`;
-}
-
-function publicTicket(ticket) {
-  if (!ticket) return null;
-  return {
-    id: ticket.id,
-    number: ticket.number,
-    serviceId: ticket.serviceId,
-    serviceName: ticket.serviceName,
-    status: ticket.status,
-    channel: ticket.channel,
-    deliveryType: ticket.deliveryType,
-    phone: ticket.phone,
-    email: ticket.email,
-    language: ticket.language,
-    peopleAhead: ticket.peopleAhead,
-    estimatedWaitMinutes: ticket.estimatedWaitMinutes,
-    queueEnteredAt: ticket.queueEnteredAt,
-    calledAt: ticket.calledAt,
-    callCount: ticket.callCount,
-    moduleNumber: ticket.moduleNumber,
-    attentionStartedAt: ticket.attentionStartedAt,
-    attentionFinishedAt: ticket.attentionFinishedAt,
-    notes: ticket.notes
-  };
-}
-
-function publicService(service) {
-  return {
-    id: service.id,
-    name: service.name,
-    prefix: service.prefix,
-    estimatedMinutes: service.estimatedMinutes,
-    color: service.color,
-    active: service.active
-  };
-}
-
-function registerCall(ticket, type = 'Llamado') {
-  recentCalls.unshift({
-    id: ticket.id,
-    number: ticket.number,
-    serviceName: ticket.serviceName,
-    moduleNumber: advisor.moduleNumber,
-    type,
-    timestamp: nowIso()
-  });
-  if (recentCalls.length > 6) recentCalls.pop();
-}
-
-function finalizeCurrentTicket(nextStatus, notes = '') {
-  if (!currentTicket) return null;
-  currentTicket.status = nextStatus;
-  currentTicket.notes = clampText(notes, 240);
-  currentTicket.attentionFinishedAt = nowIso();
-  history.push({ ...currentTicket });
-  const finalized = { ...currentTicket };
-  currentTicket = null;
-  return finalized;
-}
-
-function buildDashboard() {
-  const completed = history.filter(t => t.status === 'Finalizado');
-  const called = history.filter(t => t.calledAt);
-
-  return {
-    queueTotal: queue.length,
-    avgWaitMinutes: average(called.map(t => minutesBetween(t.queueEnteredAt, t.calledAt))),
-    avgAttentionMinutes: average(completed.map(t => minutesBetween(t.attentionStartedAt, t.attentionFinishedAt))),
-    completedCount: completed.length,
-    absentCount: history.filter(t => t.status === 'Ausente').length,
-    cancelledCount: history.filter(t => t.status === 'Cancelado').length,
-    congestion: queue.length >= 6,
-    serviceLoad: services.map(service => ({
-      id: service.id,
-      name: service.name,
-      pendingCount: queue.filter(t => t.serviceId === service.id).length,
-      completedCount: completed.filter(t => t.serviceId === service.id).length
-    }))
-  };
-}
-
-function buildStatePayload() {
-  return {
-    services: services.map(publicService),
-    turnoActual: publicTicket(currentTicket),
-    enEspera: queue.map(publicTicket),
-    recentCalls,
-    history: history.slice(-8).reverse().map(publicTicket),
-    waitMessages,
-    advisor,
-    dashboard: buildDashboard(),
-    generatedAt: nowIso()
-  };
-}
-
-function ensureAdvisorReady(res) {
-  if (!advisor.loggedIn) {
-    res.status(400).json({ success: false, message: 'Inicia sesión con tu número de módulo antes de atender.' });
-    return false;
-  }
-  return true;
-}
-
-// ====================== RUTAS ======================
-app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'pages', 'index.html')));
-app.get('/asesor', (req, res) => res.sendFile(path.join(__dirname, 'pages', 'asesor.html')));
-app.get('/admin', (req, res) => res.sendFile(path.join(__dirname, 'pages', 'admin.html')));
-
-app.get('/api/estado', (req, res) => res.json(buildStatePayload()));
-
-// Crear turno
-app.post('/api/turnos', (req, res) => {
-  const service = getServiceById(req.body.serviceId);
-  if (!service || !service.active) {
-    return res.status(400).json({ success: false, message: 'Selecciona un servicio válido.' });
-  }
-
-  const deliveryType = req.body.deliveryType === 'digital' ? 'digital' : 'impreso';
-  const phone = clampText(req.body.phone, 30);
-  const email = clampText(req.body.email, 80).toLowerCase();
-
-  if (deliveryType === 'digital' && !phone && !email) {
-    return res.status(400).json({ success: false, message: 'Para ticket digital debes ingresar teléfono o correo.' });
-  }
-
-  // Reset diario del contador
-  const today = new Date().toDateString();
-  if (today !== lastResetDate) {
-    ticketCounter = 1;
-    lastResetDate = today;
-  }
-
-  const newTicket = {
-    id: createTicketCode(service),
-    number: ticketCounter,
-    serviceId: service.id,
-    serviceName: service.name,
-    status: 'Pendiente',
-    channel: ['kiosco', 'web', 'movil'].includes(req.body.channel) ? req.body.channel : 'kiosco',
-    deliveryType,
-    phone,
-    email,
-    language: ['es', 'en'].includes(req.body.language) ? req.body.language : 'es',
-    peopleAhead: queue.length + (currentTicket ? 1 : 0),
-    estimatedWaitMinutes: computeEstimatedWait(service.id),
-    queueEnteredAt: nowIso(),
-    calledAt: null,
-    callCount: 0,
-    moduleNumber: null,
-    attentionStartedAt: null,
-    attentionFinishedAt: null,
-    notes: ''
-  };
-
-  ticketCounter++;
-  queue.push(newTicket);
-  saveState();
-
-  res.status(201).json({ success: true, ticket: publicTicket(newTicket) });
+  cola.push(turno);
+  emitirEstado();
+  res.json({ ok: true, turno });
 });
 
-// Cancelar turno
-app.post('/api/turnos/:id/cancelar', (req, res) => {
-  const index = queue.findIndex(t => t.id === req.params.id);
-  if (index === -1) return res.status(404).json({ success: false, message: 'Turno no encontrado.' });
-
-  const [ticket] = queue.splice(index, 1);
-  ticket.status = 'Cancelado';
-  ticket.attentionFinishedAt = nowIso();
-  history.push(ticket);
-  saveState();
-
-  res.json({ success: true, ticket: publicTicket(ticket) });
+// Cancelar turno por cliente
+app.post('/api/turno/:id/cancelar', (req, res) => {
+  const turno = cola.find(t => t.id === req.params.id);
+  if (!turno) return res.status(404).json({ error: 'Turno no encontrado' });
+  turno.estado = 'cancelado';
+  turno.horaFin = new Date().toISOString();
+  emitirEstado();
+  res.json({ ok: true });
 });
 
-// Login asesor
+// Estado de un turno específico
+app.get('/api/turno/:id', (req, res) => {
+  const turno = cola.find(t => t.id === req.params.id);
+  if (!turno) return res.status(404).json({ error: 'No encontrado' });
+  const pos = cola.filter(t => t.servicio === turno.servicio && t.estado === 'esperando' &&
+    new Date(t.horaCreacion) < new Date(turno.horaCreacion)).length + 1;
+  res.json({ ...turno, posicion: turno.estado === 'esperando' ? pos : 0 });
+});
+
+// ─── API ASESOR ───────────────────────────────────────────────────────────────
+
 app.post('/api/asesor/login', (req, res) => {
-  const moduleNumber = clampText(req.body.moduleNumber, 12);
-  if (!moduleNumber) return res.status(400).json({ success: false, message: 'Ingresa el número de módulo.' });
-
-  advisor.loggedIn = true;
-  advisor.moduleNumber = moduleNumber;
-  advisor.paused = false;
-  saveState();
-  res.json({ success: true, advisor });
+  const { modulo, password } = req.body;
+  const asesor = asesores.find(a => a.modulo === modulo && a.password === password);
+  if (!asesor) return res.status(401).json({ error: 'Credenciales incorrectas' });
+  modulos[modulo] = { asesorId: asesor.id, asesorNombre: asesor.nombre, estado: 'disponible', servicioActual: null };
+  emitirEstado();
+  res.json({ ok: true, asesor: { ...asesor, password: undefined } });
 });
 
-// Pausa
-app.post('/api/asesor/pausa', (req, res) => {
-  if (!ensureAdvisorReady(res)) return;
-  advisor.paused = !advisor.paused;
-  saveState();
-  res.json({ success: true, advisor });
-});
+app.post('/api/asesor/llamar', (req, res) => {
+  const { modulo, servicioId } = req.body;
+  // Buscar siguiente turno en espera para el servicio
+  const siguiente = cola.find(t =>
+    t.estado === 'esperando' &&
+    (!servicioId || t.servicio === servicioId)
+  );
+  if (!siguiente) return res.status(404).json({ error: 'No hay turnos en espera' });
 
-// Seleccionar servicios del asesor
-app.post('/api/asesor/servicios', (req, res) => {
-  if (!ensureAdvisorReady(res)) return;
-  const requested = Array.isArray(req.body.serviceIds) ? req.body.serviceIds : [];
-  const validIds = requested.filter(id => getServiceById(id));
+  siguiente.estado = 'llamado';
+  siguiente.horaLlamado = new Date().toISOString();
+  siguiente.modulo = modulo;
 
-  if (!validIds.length) return res.status(400).json({ success: false, message: 'Selecciona al menos un servicio.' });
-
-  advisor.serviceIds = validIds;
-  saveState();
-  res.json({ success: true, advisor });
-});
-
-// Llamar siguiente turno
-app.post('/api/llamar', (req, res) => {
-  if (!ensureAdvisorReady(res)) return;
-  if (advisor.paused) return res.status(400).json({ success: false, message: 'El módulo está en pausa.' });
-  if (currentTicket) return res.status(400).json({ success: false, message: 'Finaliza el turno actual primero.' });
-
-  const nextIndex = queue.findIndex(t => advisor.serviceIds.includes(t.serviceId));
-  if (nextIndex === -1) return res.status(400).json({ success: false, message: 'No hay turnos en espera para tus servicios.' });
-
-  const [ticket] = queue.splice(nextIndex, 1);
-  ticket.status = 'En atencion';
-  ticket.callCount = 1;
-  ticket.calledAt = nowIso();
-  ticket.attentionStartedAt = ticket.calledAt;
-  ticket.moduleNumber = advisor.moduleNumber;
-  currentTicket = ticket;
-
-  registerCall(ticket, 'Llamado');
-  saveState();
-
-  res.json({ success: true, turno: publicTicket(currentTicket) });
-});
-
-// Rellamar
-app.post('/api/rellamar', (req, res) => {
-  if (!ensureAdvisorReady(res)) return;
-  if (!currentTicket) return res.status(400).json({ success: false, message: 'No hay turno activo.' });
-
-  currentTicket.callCount++;
-  registerCall(currentTicket, 'Rellamado');
-  saveState();
-  res.json({ success: true, turno: publicTicket(currentTicket) });
-});
-
-// Ausencia
-app.post('/api/ausencia', (req, res) => {
-  if (!ensureAdvisorReady(res)) return;
-  if (!currentTicket) return res.status(400).json({ success: false, message: 'No hay turno activo.' });
-  if (currentTicket.callCount < 3) return res.status(400).json({ success: false, message: 'Debes llamar 3 veces antes de marcar ausencia.' });
-
-  const ticket = finalizeCurrentTicket('Ausente');
-  saveState();
-  res.json({ success: true, turno: publicTicket(ticket) });
-});
-
-// Finalizar
-app.post('/api/finalizar', (req, res) => {
-  if (!ensureAdvisorReady(res)) return;
-  if (!currentTicket) return res.status(400).json({ success: false, message: 'No hay turno activo.' });
-
-  const ticket = finalizeCurrentTicket('Finalizado', req.body.notes);
-  saveState();
-  res.json({ success: true, turno: publicTicket(ticket) });
-});
-
-// Crear servicio
-app.post('/api/servicios', (req, res) => {
-  const name = clampText(req.body.name, 40);
-  if (!name) return res.status(400).json({ success: false, message: 'El servicio necesita un nombre.' });
-
-  const newService = {
-    id: createServiceId(name),
-    name,
-    prefix: clampText(req.body.prefix, 4).toUpperCase() || 'SV',
-    estimatedMinutes: Math.max(1, Math.min(60, Number(req.body.estimatedMinutes) || 5)),
-    color: '#8b5cf6',
-    active: true
-  };
-
-  services.push(newService);
-  advisor.serviceIds = services.map(s => s.id);
-  saveState();
-
-  res.status(201).json({ success: true, service: publicService(newService) });
-});
-
-// Editar servicio
-app.put('/api/servicios/:id', (req, res) => {
-  const service = getServiceById(req.params.id);
-  if (!service) return res.status(404).json({ success: false, message: 'Servicio no encontrado.' });
-
-  const name = clampText(req.body.name, 40);
-  if (!name) return res.status(400).json({ success: false, message: 'El servicio necesita un nombre.' });
-
-  service.name = name;
-  service.prefix = clampText(req.body.prefix, 4).toUpperCase() || service.prefix;
-  service.estimatedMinutes = Math.max(1, Math.min(60, Number(req.body.estimatedMinutes) || service.estimatedMinutes));
-
-  // Actualizar nombre en todos los tickets
-  queue = queue.map(t => t.serviceId === service.id ? { ...t, serviceName: service.name } : t);
-  if (currentTicket && currentTicket.serviceId === service.id) currentTicket.serviceName = service.name;
-  history = history.map(t => t.serviceId === service.id ? { ...t, serviceName: service.name } : t);
-
-  saveState();
-  res.json({ success: true, service: publicService(service) });
-});
-
-// Eliminar servicio
-app.delete('/api/servicios/:id', (req, res) => {
-  if (queue.some(t => t.serviceId === req.params.id) || (currentTicket && currentTicket.serviceId === req.params.id)) {
-    return res.status(400).json({ success: false, message: 'No puedes eliminar un servicio con turnos activos.' });
+  if (modulos[modulo]) {
+    modulos[modulo].estado = 'ocupado';
+    modulos[modulo].turnoActual = siguiente.id;
+    modulos[modulo].servicioActual = siguiente.servicio;
   }
 
-  const newServices = services.filter(s => s.id !== req.params.id);
-  if (newServices.length === services.length) return res.status(404).json({ success: false, message: 'Servicio no encontrado.' });
+  // Pantalla de espera
+  ultimosLlamados.unshift({ codigo: siguiente.codigo, modulo, servicioNombre: siguiente.servicioNombre, hora: new Date().toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' }) });
+  if (ultimosLlamados.length > 6) ultimosLlamados.pop();
 
-  services = newServices;
-  advisor.serviceIds = advisor.serviceIds.filter(id => id !== req.params.id);
-  if (!advisor.serviceIds.length) advisor.serviceIds = services.map(s => s.id);
-
-  saveState();
-  res.json({ success: true });
+  io.emit('turno-llamado', { turno: siguiente, modulo });
+  emitirEstado();
+  res.json({ ok: true, turno: siguiente });
 });
 
-// Mensajes de espera
-app.post('/api/mensajes', (req, res) => {
-  const messages = Array.isArray(req.body.messages)
-    ? req.body.messages.map(m => clampText(m, 140)).filter(Boolean)
-    : [];
-
-  if (!messages.length) return res.status(400).json({ success: false, message: 'Ingresa al menos un mensaje.' });
-
-  waitMessages = messages;
-  saveState();
-  res.json({ success: true, waitMessages });
+app.post('/api/asesor/rellamar', (req, res) => {
+  const { turnoId, modulo } = req.body;
+  const turno = cola.find(t => t.id === turnoId);
+  if (!turno) return res.status(404).json({ error: 'Turno no encontrado' });
+  io.emit('turno-llamado', { turno, modulo, rellamado: true });
+  res.json({ ok: true });
 });
 
-// Reporte CSV
-app.get('/api/reportes.csv', (req, res) => {
-  const headers = ['Codigo','Servicio','Estado','Canal','Entrega','Modulo','Ingreso','Llamado','Finalizado','Espera (min)','Atencion (min)','Notas'];
-  const escapeCsv = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
-
-  const rows = history.map(t => [
-    t.id, t.serviceName, t.status, t.channel, t.deliveryType, t.moduleNumber || '',
-    t.queueEnteredAt || '', t.calledAt || '', t.attentionFinishedAt || '',
-    minutesBetween(t.queueEnteredAt, t.calledAt),
-    minutesBetween(t.attentionStartedAt, t.attentionFinishedAt),
-    t.notes || ''
-  ]);
-
-  const csv = [headers, ...rows].map(row => row.map(escapeCsv).join(',')).join('\n');
-
-  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-  res.setHeader('Content-Disposition', 'attachment; filename="reporte-turnos.csv"');
-  res.send(`\ufeff${csv}`);
+app.post('/api/asesor/finalizar', (req, res) => {
+  const { turnoId, modulo, notas } = req.body;
+  const turno = cola.find(t => t.id === turnoId);
+  if (!turno) return res.status(404).json({ error: 'Turno no encontrado' });
+  turno.estado = 'atendido';
+  turno.horaFin = new Date().toISOString();
+  turno.notas = notas || '';
+  if (modulos[modulo]) {
+    modulos[modulo].estado = 'disponible';
+    modulos[modulo].turnoActual = null;
+  }
+  turnos.push({ ...turno });
+  emitirEstado();
+  res.json({ ok: true });
 });
 
-// ====================== MIDDLEWARE DE ERRORES ======================
-app.use((err, req, res, next) => {
-  console.error('Error interno:', err);
-  res.status(500).json({ success: false, message: 'Error interno del servidor.' });
+app.post('/api/asesor/ausente', (req, res) => {
+  const { turnoId, modulo } = req.body;
+  const turno = cola.find(t => t.id === turnoId);
+  if (!turno) return res.status(404).json({ error: 'Turno no encontrado' });
+  turno.estado = 'ausente';
+  turno.horaFin = new Date().toISOString();
+  if (modulos[modulo]) {
+    modulos[modulo].estado = 'disponible';
+    modulos[modulo].turnoActual = null;
+  }
+  emitirEstado();
+  res.json({ ok: true });
 });
 
-// ====================== INICIO ======================
-loadState();
-
-app.listen(PORT, () => {
-  console.log('🚀 Servidor de turnos PRO corriendo');
-  console.log(`   → Cliente: http://localhost:${PORT}/`);
-  console.log(`   → Asesor:  http://localhost:${PORT}/asesor`);
-  console.log(`   → Admin:   http://localhost:${PORT}/admin`);
-  console.log(`   → Datos persistidos en: ${DATA_FILE}`);
+app.post('/api/asesor/pausa', (req, res) => {
+  const { modulo, activa } = req.body;
+  if (modulos[modulo]) modulos[modulo].estado = activa ? 'pausa' : 'disponible';
+  emitirEstado();
+  res.json({ ok: true });
 });
+
+app.get('/api/asesor/cola', (req, res) => {
+  const { servicioId } = req.query;
+  let lista = cola.filter(t => t.estado === 'esperando');
+  if (servicioId) lista = lista.filter(t => t.servicio === servicioId);
+  res.json(lista);
+});
+
+// ─── API ADMIN ────────────────────────────────────────────────────────────────
+
+app.post('/api/admin/login', (req, res) => {
+  const { email, password } = req.body;
+  const u = usuarios.find(u => u.email === email && u.password === password && u.rol === 'admin');
+  if (!u) return res.status(401).json({ error: 'Credenciales incorrectas' });
+  res.json({ ok: true, usuario: { ...u, password: undefined } });
+});
+
+app.get('/api/admin/dashboard', (req, res) => {
+  const hoy = new Date().toDateString();
+  const hoyTurnos = cola.filter(t => new Date(t.horaCreacion).toDateString() === hoy);
+  res.json({
+    totalHoy: hoyTurnos.length,
+    atendidos: hoyTurnos.filter(t => t.estado === 'atendido').length,
+    esperando: cola.filter(t => t.estado === 'esperando').length,
+    cancelados: hoyTurnos.filter(t => t.estado === 'cancelado').length,
+    ausentes: hoyTurnos.filter(t => t.estado === 'ausente').length,
+    porServicio: servicios.map(s => ({
+      nombre: s.nombre,
+      total: hoyTurnos.filter(t => t.servicio === s.id).length,
+      esperando: cola.filter(t => t.servicio === s.id && t.estado === 'esperando').length,
+    })),
+    modulos: Object.entries(modulos).map(([num, m]) => ({ modulo: num, ...m })),
+  });
+});
+
+app.get('/api/admin/turnos', (req, res) => {
+  res.json([...turnos, ...cola].sort((a, b) => new Date(b.horaCreacion) - new Date(a.horaCreacion)).slice(0, 100));
+});
+
+app.get('/api/admin/servicios', (req, res) => res.json(servicios));
+app.post('/api/admin/servicios', (req, res) => {
+  const { nombre, codigo } = req.body;
+  const nuevo = { id: 's' + Date.now(), nombre, codigo: codigo.toUpperCase(), activo: true };
+  servicios.push(nuevo);
+  res.json(nuevo);
+});
+app.put('/api/admin/servicios/:id', (req, res) => {
+  const srv = servicios.find(s => s.id === req.params.id);
+  if (!srv) return res.status(404).json({ error: 'No encontrado' });
+  Object.assign(srv, req.body);
+  res.json(srv);
+});
+app.delete('/api/admin/servicios/:id', (req, res) => {
+  servicios = servicios.filter(s => s.id !== req.params.id);
+  res.json({ ok: true });
+});
+
+app.get('/api/admin/usuarios', (req, res) => res.json(usuarios.map(u => ({ ...u, password: undefined }))));
+app.post('/api/admin/usuarios', (req, res) => {
+  const u = { id: 'u' + Date.now(), ...req.body };
+  usuarios.push(u);
+  res.json({ ...u, password: undefined });
+});
+app.delete('/api/admin/usuarios/:id', (req, res) => {
+  usuarios = usuarios.filter(u => u.id !== req.params.id);
+  res.json({ ok: true });
+});
+
+// Estado en tiempo real para pantalla de espera
+app.get('/api/pantalla', (req, res) => {
+  res.json({
+    ultimosLlamados,
+    esperando: cola.filter(t => t.estado === 'esperando').length,
+    servicios: servicios.filter(s => s.activo).map(s => ({
+      nombre: s.nombre,
+      enEspera: cola.filter(t => t.servicio === s.id && t.estado === 'esperando').length,
+    })),
+  });
+});
+
+// ─── Socket.IO ────────────────────────────────────────────────────────────────
+io.on('connection', (socket) => {
+  emitirEstado();
+});
+
+// ─── Rutas HTML ───────────────────────────────────────────────────────────────
+['/', '/cliente', '/asesor', '/admin', '/pantalla'].forEach(route => {
+  app.get(route, (req, res) => {
+    const page = route === '/' ? 'index' : route.slice(1);
+    res.sendFile(path.join(__dirname, 'public', `${page}.html`));
+  });
+});
+
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, () => console.log(`✅ Servidor corriendo en http://localhost:${PORT}`));
