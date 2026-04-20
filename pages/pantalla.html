@@ -1,210 +1,447 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Pantalla de Espera | Sistema de Turnos</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800&family=JetBrains+Mono:wght@700&display=swap" rel="stylesheet">
-  <style>
-    * { font-family: 'Archivo', -apple-system, sans-serif; }
-    .mono { font-family: 'JetBrains Mono', monospace; }
-    
-    :root {
-      --primary: #EC0000;
-      --accent: #00B140;
-    }
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pantalla de Espera – TurnoFlow</title>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="/socket.io/socket.io.js"></script>
+<style>
+  :root {
+    --bg: #060810;
+    --panel: #0d1117;
+    --border: #1a1f2e;
+    --accent: #00d4aa;
+    --red: #ff4b5c;
+    --gold: #ffb347;
+    --blue: #4da6ff;
+    --text: #e8eaf0;
+    --muted: #4a5068;
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    font-family: 'DM Mono', monospace;
+    background: var(--bg);
+    color: var(--text);
+    overflow: hidden;
+    position: relative;
+  }
 
-    body {
-      background: linear-gradient(135deg, #1A1A1A 0%, #2A2A2A 100%);
-      overflow: hidden;
-    }
+  /* Atmospheric background */
+  body::before {
+    content: '';
+    position: fixed; inset: 0; z-index: 0;
+    background:
+      radial-gradient(ellipse at 10% 90%, rgba(0,212,170,.06) 0%, transparent 50%),
+      radial-gradient(ellipse at 90% 10%, rgba(77,166,255,.05) 0%, transparent 40%);
+    pointer-events: none;
+  }
 
-    @keyframes slideIn {
-      from { transform: translateX(-100%); opacity: 0; }
-      to { transform: translateX(0); opacity: 1; }
-    }
+  /* Grid scanlines */
+  body::after {
+    content: '';
+    position: fixed; inset: 0; z-index: 0;
+    background-image:
+      linear-gradient(rgba(255,255,255,.018) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,.018) 1px, transparent 1px);
+    background-size: 60px 60px;
+    pointer-events: none;
+  }
 
-    @keyframes pulse {
-      0%, 100% { transform: scale(1); }
-      50% { transform: scale(1.05); }
-    }
+  .screen-wrap {
+    position: relative; z-index: 1;
+    height: 100vh;
+    display: grid;
+    grid-template-rows: auto 1fr auto;
+    padding: 2rem;
+    gap: 1.5rem;
+  }
 
-    .slide-in {
-      animation: slideIn 0.5s ease;
-    }
+  /* ── HEADER ── */
+  .top-bar {
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .logo {
+    font-family: 'Syne', sans-serif;
+    font-size: 1.3rem; font-weight: 800;
+    letter-spacing: -0.5px;
+  }
+  .logo span { color: var(--accent); }
+  .clock {
+    font-size: 2rem; font-weight: 500;
+    color: var(--accent); letter-spacing: .05em;
+  }
+  .date-str { font-size: .75rem; color: var(--muted); text-align: right; margin-top: .1rem; }
 
-    .pulse {
-      animation: pulse 2s infinite;
-    }
+  /* ── MAIN AREA ── */
+  .main-area {
+    display: grid;
+    grid-template-columns: 1fr 340px;
+    gap: 1.5rem;
+    min-height: 0;
+  }
 
-    .message-scroll {
-      overflow: hidden;
-      white-space: nowrap;
-    }
+  /* TURNOS LLAMADOS */
+  .called-panel {
+    display: flex; flex-direction: column; gap: 1rem;
+    min-height: 0;
+  }
+  .called-label {
+    font-size: .65rem; letter-spacing: .2em; text-transform: uppercase;
+    color: var(--muted); margin-bottom: .25rem;
+  }
+  .called-list {
+    flex: 1; display: flex; flex-direction: column; gap: .75rem;
+    overflow: hidden;
+  }
 
-    .message-scroll p {
-      display: inline-block;
-      padding-left: 100%;
-      animation: scroll 20s linear infinite;
-    }
+  .called-item {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 1.25rem 1.75rem;
+    display: flex; align-items: center; gap: 1.5rem;
+    position: relative; overflow: hidden;
+    transition: all .3s;
+  }
+  .called-item.new {
+    border-color: var(--accent);
+    box-shadow: 0 0 30px rgba(0,212,170,.2), inset 0 0 20px rgba(0,212,170,.03);
+    animation: pulse-border 2s ease;
+  }
+  @keyframes pulse-border {
+    0% { box-shadow: 0 0 0 0 rgba(0,212,170,.5); }
+    50% { box-shadow: 0 0 40px rgba(0,212,170,.3); }
+    100% { box-shadow: 0 0 30px rgba(0,212,170,.2); }
+  }
+  .called-item::before {
+    content: ''; position: absolute; left: 0; top: 0; bottom: 0;
+    width: 4px; background: var(--c, var(--accent));
+    border-radius: 4px 0 0 4px;
+  }
+  .called-num {
+    font-family: 'Syne', sans-serif;
+    font-size: 2.5rem; font-weight: 800;
+    line-height: 1; letter-spacing: -2px;
+    color: var(--c, var(--accent));
+    min-width: 120px;
+  }
+  .called-info { flex: 1; }
+  .called-srv { font-size: .8rem; color: var(--muted); margin-bottom: .2rem; }
+  .called-name { font-size: 1rem; font-weight: 500; }
+  .called-modulo {
+    font-size: .7rem; color: var(--muted);
+    display: flex; align-items: center; gap: .4rem; margin-top: .25rem;
+  }
+  .called-modulo::before { content: '▶'; font-size: .6rem; }
+  .called-hora {
+    font-size: .8rem; color: var(--muted);
+    text-align: right;
+  }
 
-    @keyframes scroll {
-      0% { transform: translateX(0); }
-      100% { transform: translateX(-100%); }
-    }
-  </style>
+  /* Placeholder */
+  .no-calls {
+    flex: 1; display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    color: var(--muted); text-align: center; gap: 1rem;
+  }
+  .no-calls-icon { font-size: 3rem; opacity: .3; }
+  .no-calls p { font-size: .85rem; }
+
+  /* ── PANEL DERECHO ── */
+  .right-panel {
+    display: flex; flex-direction: column; gap: 1rem;
+    min-height: 0;
+  }
+
+  .info-card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 1.25rem;
+  }
+  .ic-label {
+    font-size: .6rem; letter-spacing: .18em; text-transform: uppercase;
+    color: var(--muted); margin-bottom: .75rem;
+  }
+
+  /* Servicios en espera */
+  .srv-list { display: flex; flex-direction: column; gap: .6rem; }
+  .srv-row {
+    display: flex; align-items: center; gap: .75rem;
+  }
+  .srv-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .srv-name-label { font-size: .85rem; flex: 1; }
+  .srv-n {
+    font-family: 'Syne', sans-serif; font-weight: 700;
+    font-size: 1.1rem;
+    color: var(--accent);
+  }
+  .srv-bar-bg {
+    width: 100%; height: 3px; background: var(--border);
+    border-radius: 2px; margin-top: .4rem;
+    grid-column: 2;
+  }
+  .srv-bar-fill {
+    height: 100%; border-radius: 2px;
+    transition: width .5s ease;
+  }
+
+  /* Total */
+  .total-display {
+    text-align: center;
+  }
+  .total-num {
+    font-family: 'Syne', sans-serif;
+    font-size: 3.5rem; font-weight: 800;
+    line-height: 1; color: var(--gold);
+    letter-spacing: -3px;
+  }
+  .total-label { font-size: .7rem; color: var(--muted); margin-top: .25rem; }
+
+  /* ── BOTTOM BAR ── */
+  .bottom-bar {
+    display: flex; align-items: center; justify-content: space-between;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: .9rem 1.5rem;
+  }
+  .bb-item { display: flex; align-items: center; gap: .5rem; font-size: .78rem; color: var(--muted); }
+  .bb-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+  .bb-dot.off { background: var(--muted); }
+  .connection-status { font-size: .7rem; color: var(--accent); }
+  .connection-status.disconnected { color: var(--red); }
+
+  /* ── FLASH OVERLAY ── */
+  .flash {
+    position: fixed; inset: 0; z-index: 50;
+    background: rgba(0,212,170,.06);
+    border: 2px solid rgba(0,212,170,.3);
+    pointer-events: none; opacity: 0;
+    transition: opacity .15s;
+  }
+  .flash.show { opacity: 1; }
+
+  /* ── COLORES POR SERVICIO ── */
+  .color-0 { --c: #00d4aa; }
+  .color-1 { --c: #4da6ff; }
+  .color-2 { --c: #ffb347; }
+  .color-3 { --c: #ff7eb3; }
+  .color-4 { --c: #c77dff; }
+  .color-5 { --c: #56cfe1; }
+
+  @media (max-width: 900px) {
+    .main-area { grid-template-columns: 1fr; }
+    .right-panel { display: none; }
+    .called-num { font-size: 2rem; min-width: 90px; }
+  }
+</style>
 </head>
-<body class="text-white">
+<body>
 
-  <!-- HEADER -->
-  <header class="bg-black/50 backdrop-blur-lg border-b border-white/10">
-    <div class="max-w-7xl mx-auto px-8 py-6">
-      <div class="flex items-center justify-between">
-        <div class="flex items-center gap-4">
-          <div class="w-16 h-16 bg-white rounded-2xl flex items-center justify-center">
-            <svg class="w-10 h-10" viewBox="0 0 24 24" fill="var(--primary)">
-              <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
-            </svg>
-          </div>
-          <div>
-            <h1 class="text-4xl font-bold">Sistema de Turnos</h1>
-            <p class="text-gray-400">Pantalla de Espera | Santander</p>
-          </div>
+<div class="flash" id="flash"></div>
+
+<div class="screen-wrap">
+  <!-- TOP -->
+  <div class="top-bar">
+    <div>
+      <div class="logo">Turno<span>Flow</span></div>
+      <div style="font-size:.65rem;color:var(--muted);letter-spacing:.12em;text-transform:uppercase;margin-top:.2rem">
+        Pantalla de espera
+      </div>
+    </div>
+    <div>
+      <div class="clock" id="clock">00:00</div>
+      <div class="date-str" id="date-str">—</div>
+    </div>
+  </div>
+
+  <!-- MAIN -->
+  <div class="main-area">
+    <!-- IZQUIERDO: LLAMADOS -->
+    <div class="called-panel">
+      <div class="called-label">Últimos turnos llamados</div>
+      <div class="called-list" id="called-list">
+        <div class="no-calls">
+          <div class="no-calls-icon">🎫</div>
+          <p>Los turnos llamados aparecerán aquí</p>
         </div>
-        
-        <div class="text-right">
-          <div id="clock" class="text-4xl font-bold mono"></div>
-          <div id="date" class="text-gray-400"></div>
+      </div>
+    </div>
+
+    <!-- DERECHO: INFO -->
+    <div class="right-panel">
+      <div class="info-card">
+        <div class="ic-label">Total en espera</div>
+        <div class="total-display">
+          <div class="total-num" id="total-espera">0</div>
+          <div class="total-label">personas en cola</div>
+        </div>
+      </div>
+      <div class="info-card" style="flex:1;overflow:hidden">
+        <div class="ic-label">Cola por servicio</div>
+        <div class="srv-list" id="srv-list">
+          <div style="font-size:.8rem;color:var(--muted)">Cargando…</div>
+        </div>
+      </div>
+      <div class="info-card">
+        <div class="ic-label">Sistema</div>
+        <div class="connection-status" id="conn-status">● Conectado en tiempo real</div>
+        <div style="font-size:.7rem;color:var(--muted);margin-top:.4rem">
+          Actualización automática
         </div>
       </div>
     </div>
-  </header>
+  </div>
 
-  <!-- MAIN CONTENT -->
-  <main class="max-w-7xl mx-auto px-8 py-12">
-    
-    <!-- Current Calls -->
-    <div class="mb-12">
-      <h2 class="text-3xl font-bold mb-8 text-center">
-        <span style="color: var(--accent);">●</span> Turnos Llamados Recientemente
-      </h2>
-      
-      <div id="recent-calls" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"></div>
+  <!-- BOTTOM -->
+  <div class="bottom-bar">
+    <div class="bb-item">
+      <span class="bb-dot" id="live-dot"></span>
+      <span id="live-text">En vivo</span>
     </div>
+    <div class="bb-item" style="font-size:.7rem;color:var(--muted)">
+      TurnoFlow · Sistema de Gestión de Turnos Omnicanal
+    </div>
+    <div class="bb-item">
+      <a href="/cliente" style="color:var(--accent);text-decoration:none;font-size:.72rem">
+        Solicitar turno →
+      </a>
+    </div>
+  </div>
+</div>
 
-    <!-- Queue Status -->
-    <div class="grid grid-cols-3 gap-6 mb-12">
-      <div class="bg-white/5 backdrop-blur-lg border border-white/10 rounded-2xl p-8 text-center">
-        <p class="text-gray-400 mb-2">Turnos en Espera</p>
-        <p class="text-6xl font-bold" id="queue-count">0</p>
+<script>
+const socket = io();
+const COLORS = ['color-0','color-1','color-2','color-3','color-4','color-5'];
+const SRV_COLORS = ['#00d4aa','#4da6ff','#ffb347','#ff7eb3','#c77dff','#56cfe1'];
+let llamados = [];
+
+// ── RELOJ ─────────────────────────────────────────────────────────────────
+function updateClock() {
+  const now = new Date();
+  document.getElementById('clock').textContent =
+    now.toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' });
+  document.getElementById('date-str').textContent =
+    now.toLocaleDateString('es-CO', { weekday: 'long', day: 'numeric', month: 'long' });
+}
+updateClock();
+setInterval(updateClock, 1000);
+
+// ── RENDER LLAMADOS ───────────────────────────────────────────────────────
+function renderLlamados(data) {
+  llamados = data;
+  const el = document.getElementById('called-list');
+  if (!llamados.length) {
+    el.innerHTML = `
+      <div class="no-calls">
+        <div class="no-calls-icon">🎫</div>
+        <p>Los turnos llamados aparecerán aquí</p>
+      </div>`;
+    return;
+  }
+  el.innerHTML = llamados.slice(0, 5).map((item, i) => `
+    <div class="called-item ${COLORS[i % COLORS.length]} ${i === 0 ? 'new' : ''}">
+      <div class="called-num">${item.codigo}</div>
+      <div class="called-info">
+        <div class="called-srv">${item.servicioNombre || '—'}</div>
+        <div class="called-name">${item.nombre || 'Cliente'}</div>
+        <div class="called-modulo">Diríjase al Módulo ${item.modulo}</div>
       </div>
-      
-      <div class="bg-white/5 backdrop-blur-lg border border-white/10 rounded-2xl p-8 text-center">
-        <p class="text-gray-400 mb-2">Tiempo Promedio</p>
-        <p class="text-6xl font-bold"><span id="avg-wait">0</span> min</p>
+      <div class="called-hora">${item.hora || ''}</div>
+    </div>
+  `).join('');
+}
+
+function renderServicios(svcs) {
+  const max = Math.max(...svcs.map(s => s.enEspera), 1);
+  document.getElementById('srv-list').innerHTML = svcs.map((s, i) => `
+    <div>
+      <div class="srv-row">
+        <div class="srv-dot" style="background:${SRV_COLORS[i % SRV_COLORS.length]}"></div>
+        <span class="srv-name-label">${s.nombre}</span>
+        <span class="srv-n">${s.enEspera}</span>
       </div>
-      
-      <div class="bg-white/5 backdrop-blur-lg border border-white/10 rounded-2xl p-8 text-center">
-        <p class="text-gray-400 mb-2">Atenciones Hoy</p>
-        <p class="text-6xl font-bold" id="completed-count">0</p>
+      <div class="srv-bar-bg">
+        <div class="srv-bar-fill" style="width:${(s.enEspera / max * 100)}%;background:${SRV_COLORS[i % SRV_COLORS.length]}"></div>
       </div>
     </div>
+  `).join('');
+}
 
-    <!-- Messages -->
-    <div class="bg-white/5 backdrop-blur-lg border border-white/10 rounded-2xl p-6 message-scroll">
-      <p id="messages" class="text-xl text-gray-300"></p>
-    </div>
+// ── FLASH + SONIDO ────────────────────────────────────────────────────────
+function flashScreen() {
+  const f = document.getElementById('flash');
+  f.classList.add('show');
+  setTimeout(() => f.classList.remove('show'), 300);
+}
 
-  </main>
+function playChime() {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const notes = [523, 659, 784, 1047]; // Do Mi Sol Do
+    notes.forEach((freq, i) => {
+      const o = ctx.createOscillator();
+      const g = ctx.createGain();
+      o.type = 'sine';
+      o.frequency.value = freq;
+      g.gain.setValueAtTime(0, ctx.currentTime + i * 0.18);
+      g.gain.linearRampToValueAtTime(0.25, ctx.currentTime + i * 0.18 + 0.05);
+      g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + i * 0.18 + 0.35);
+      o.connect(g); g.connect(ctx.destination);
+      o.start(ctx.currentTime + i * 0.18);
+      o.stop(ctx.currentTime + i * 0.18 + 0.4);
+    });
+  } catch(e) {}
+}
 
-  <!-- Audio for notifications -->
-  <audio id="notification-sound" preload="auto">
-    <source src="data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBTGH0fPTgjMGHm7A7+OZURE" type="audio/wav">
-  </audio>
+// ── SOCKET ────────────────────────────────────────────────────────────────
+socket.on('connect', () => {
+  document.getElementById('conn-status').textContent = '● Conectado en tiempo real';
+  document.getElementById('conn-status').classList.remove('disconnected');
+  document.getElementById('live-dot').classList.remove('off');
+  document.getElementById('live-text').textContent = 'En vivo';
+});
 
-  <script>
-    let lastCallId = null;
+socket.on('disconnect', () => {
+  document.getElementById('conn-status').textContent = '○ Desconectado';
+  document.getElementById('conn-status').classList.add('disconnected');
+  document.getElementById('live-dot').classList.add('off');
+  document.getElementById('live-text').textContent = 'Sin conexión';
+});
 
-    function updateClock() {
-      const now = new Date();
-      document.getElementById('clock').textContent = now.toLocaleTimeString('es-CO');
-      document.getElementById('date').textContent = now.toLocaleDateString('es-CO', { 
-        weekday: 'long', 
-        year: 'numeric', 
-        month: 'long', 
-        day: 'numeric' 
-      });
-    }
+socket.on('estado', data => {
+  document.getElementById('total-espera').textContent = data.totalEsperando || 0;
+  renderServicios(data.servicios || []);
+});
 
-    async function loadWaitingScreen() {
-      try {
-        const res = await fetch('/api/estado');
-        const data = await res.json();
-        
-        // Update stats
-        document.getElementById('queue-count').textContent = data.dashboard.queueTotal;
-        document.getElementById('avg-wait').textContent = data.dashboard.avgWaitMinutes;
-        document.getElementById('completed-count').textContent = data.dashboard.completedCount;
-        
-        // Update recent calls
-        const container = document.getElementById('recent-calls');
-        
-        if (data.recentCalls && data.recentCalls.length > 0) {
-          // Check for new calls and play sound
-          if (lastCallId && data.recentCalls[0].id !== lastCallId) {
-            playNotificationSound();
-          }
-          lastCallId = data.recentCalls[0].id;
-          
-          container.innerHTML = data.recentCalls.map((call, i) => `
-            <div class="bg-white/10 backdrop-blur-lg border border-white/20 rounded-2xl p-8 text-center slide-in ${i === 0 ? 'pulse' : ''}" style="animation-delay: ${i * 0.1}s;">
-              <div class="text-7xl font-bold mono mb-4" style="color: var(--accent);">
-                ${call.number}
-              </div>
-              <div class="text-2xl font-semibold mb-2">${call.serviceName}</div>
-              <div class="text-lg text-gray-400">
-                Módulo ${call.moduleNumber}
-              </div>
-              <div class="mt-4 text-sm text-gray-500">
-                ${new Date(call.timestamp).toLocaleTimeString('es-CO')}
-              </div>
-            </div>
-          `).join('');
-        } else {
-          container.innerHTML = `
-            <div class="col-span-3 text-center py-16">
-              <div class="text-8xl mb-4">⏳</div>
-              <p class="text-3xl text-gray-400">En espera de turnos...</p>
-            </div>
-          `;
-        }
-        
-        // Update messages
-        const messagesEl = document.getElementById('messages');
-        if (data.waitMessages && data.waitMessages.length > 0) {
-          messagesEl.textContent = data.waitMessages.join('  •  ');
-        } else {
-          messagesEl.textContent = 'Bienvenido al sistema de turnos. Por favor espere su turno.';
-        }
-        
-      } catch (error) {
-        console.error('Error loading waiting screen:', error);
-      }
-    }
+socket.on('turno-llamado', data => {
+  // Agregar al inicio de la lista
+  const t = data.turno;
+  llamados.unshift({
+    codigo: t.codigo,
+    servicioNombre: t.servicioNombre,
+    nombre: t.nombre,
+    modulo: data.modulo,
+    hora: new Date().toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' }),
+  });
+  if (llamados.length > 5) llamados.pop();
+  renderLlamados(llamados);
+  flashScreen();
+  playChime();
+});
 
-    function playNotificationSound() {
-      const audio = document.getElementById('notification-sound');
-      audio.play().catch(err => console.log('Audio play failed:', err));
-    }
-
-    // Initialize
-    updateClock();
-    setInterval(updateClock, 1000);
-    
-    loadWaitingScreen();
-    setInterval(loadWaitingScreen, 3000);
-  </script>
-
+// Cargar estado inicial
+fetch('/api/pantalla').then(r => r.json()).then(data => {
+  document.getElementById('total-espera').textContent = data.esperando || 0;
+  if (data.ultimosLlamados?.length) renderLlamados(data.ultimosLlamados);
+  if (data.servicios?.length) renderServicios(data.servicios);
+});
+</script>
 </body>
 </html>
